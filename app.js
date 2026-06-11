@@ -264,13 +264,11 @@
     container.querySelectorAll('.dz').forEach(zone => {
       zone.addEventListener('dragover', e => {
         if (!dragId) return;
+        e.preventDefault();  // toujours nécessaire pour activer le drop
         const pos   = parseInt(zone.dataset.pos);
         const valid = isDropValid(dragId, pos);
+        e.dataTransfer.dropEffect = valid ? 'move' : 'none';
         zone.className = 'dz ' + (valid ? 'dz-ok' : 'dz-ko');
-        if (valid) {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-        }
       });
 
       zone.addEventListener('dragleave', () => {
