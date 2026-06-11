@@ -289,34 +289,24 @@ body {
 .task-item:hover { background: var(--bg); }
 .task-item.dragging { opacity: 0.28; pointer-events: none; }
 
-/* Zones de dépôt */
-.dz {
-  height: 10px;    /* zone de clic généreuse */
-  margin: 0 6px;
-  display: flex;
-  align-items: center;
-  position: relative;
+/* Indicateurs de dépôt sur les task-items */
+.task-item.drop-before {
+  border-top: 3px solid #22c55e;
+  margin-top: -1px;
+  box-shadow: 0 -3px 8px rgba(34,197,94,0.3);
 }
-.dz::after {
-  content: '';
-  display: block;
-  width: 100%;
-  height: 2px;
-  border-radius: 2px;
-  background: transparent;
-  transition: height 0.1s, background 0.1s, box-shadow 0.1s;
+.task-item.drop-after {
+  border-bottom: 3px solid #22c55e;
+  margin-bottom: -1px;
+  box-shadow: 0 3px 8px rgba(34,197,94,0.3);
 }
-.dz.dz-ok::after {
-  height: 5px;
-  background: #22c55e;
-  box-shadow: 0 0 8px rgba(34,197,94,0.55);
-  border-radius: 3px;
+.task-item.drop-before-ko {
+  border-top: 3px solid #ef4444;
+  margin-top: -1px;
 }
-.dz.dz-ko::after {
-  height: 5px;
-  background: #ef4444;
-  box-shadow: 0 0 6px rgba(239,68,68,0.4);
-  border-radius: 3px;
+.task-item.drop-after-ko {
+  border-bottom: 3px solid #ef4444;
+  margin-bottom: -1px;
 }
 
 .ti-bar {

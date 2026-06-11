@@ -13,7 +13,8 @@
   let nextId       = 1;
   let filterPerson = null;
   let editingId    = null;
-  let dragId       = null;  // id de la tâche en cours de drag
+  let dragId       = null;   // id de la tâche en cours de drag
+  let dragTarget   = null;   // { pos, sid } destination provisoire
 
   // ─── Persistance localStorage ──────────────────────────────
 
@@ -200,13 +201,11 @@
 
       const tasksInSec = bySec[sid] || [];
 
-      // Zone de dépôt en tête de section
-      html += `<div class="dz" data-pos="${flatIdx}" data-sid="${sid}"></div>`;
-
-      tasksInSec.forEach((t, i) => {
+      tasksInSec.forEach((t) => {
         const c  = GanttRenderer.personColor(t.person, persons);
         const sl = statusLabel(t.status);
-        html += `<div class="task-item" draggable="true" data-tid="${t.id}">
+        // data-sortpos = index dans sorted (utilisé par setupDragDrop)
+        html += `<div class="task-item" draggable="true" data-tid="${t.id}" data-sortpos="${flatIdx}" data-sid="${sid}">
           <span class="drag-handle" title="Déplacer">⠿</span>
           <div class="ti-bar" style="background:${c}"></div>
           <div class="ti-body">
@@ -222,9 +221,6 @@
         </div>`;
 
         flatIdx++;
-
-        // Zone de dépôt après chaque tâche (dans sa section)
-        html += `<div class="dz" data-pos="${flatIdx}" data-sid="${sid}"></div>`;
       });
     });
 
@@ -243,59 +239,88 @@
   }
 
   function setupDragDrop(container) {
-    // ── Drag source : les task-items ──────────────────────────
+    // Nettoie tous les indicateurs visuels sur les items
+    function clearDropIndicators() {
+      container.querySelectorAll('.task-item').forEach(el => {
+        el.classList.remove('drop-before', 'drop-before-ko', 'drop-after', 'drop-after-ko');
+      });
+    }
+
+    // Applique le drop à la position stockée dans dragTarget
+    function applyDrop() {
+      if (!dragId || !dragTarget) return;
+      const { pos: domPos, sid } = dragTarget;
+      if (!isDropValid(dragId, domPos)) return;
+
+      const sorted       = topoSort(state.tasks);
+      const draggedIndex = sorted.findIndex(t => t.id === dragId);
+      const insertPos    = domPos > draggedIndex ? domPos - 1 : domPos;
+      const sortedWithout = sorted.filter(t => t.id !== dragId);
+      const draggedTask   = state.tasks.find(t => t.id === dragId);
+      sortedWithout.splice(insertPos, 0, draggedTask);
+      draggedTask.sectionId = sid === '_' ? null : sid;
+      state.tasks = sortedWithout;
+
+      save();
+      dragId     = null;
+      dragTarget = null;
+      renderAll();
+    }
+
     container.querySelectorAll('.task-item[data-tid]').forEach(item => {
+
+      // ── Source du drag ──────────────────────────────────────
       item.addEventListener('dragstart', e => {
         dragId = item.dataset.tid;
-        // Léger délai pour que le navigateur capture le ghost avant d'appliquer l'opacité
         requestAnimationFrame(() => item.classList.add('dragging'));
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', dragId);
       });
 
       item.addEventListener('dragend', () => {
-        dragId = null;
+        dragId     = null;
+        dragTarget = null;
         item.classList.remove('dragging');
-        container.querySelectorAll('.dz').forEach(z => z.className = 'dz');
-      });
-    });
-
-    // ── Zones de dépôt ────────────────────────────────────────
-    container.querySelectorAll('.dz').forEach(zone => {
-      zone.addEventListener('dragover', e => {
-        if (!dragId) return;
-        e.preventDefault();  // toujours nécessaire pour activer le drop
-        const pos   = parseInt(zone.dataset.pos);
-        const valid = isDropValid(dragId, pos);
-        e.dataTransfer.dropEffect = valid ? 'move' : 'none';
-        zone.className = 'dz ' + (valid ? 'dz-ok' : 'dz-ko');
+        clearDropIndicators();
       });
 
-      zone.addEventListener('dragleave', () => {
-        zone.className = 'dz';
-      });
-
-      zone.addEventListener('drop', e => {
+      // ── Cible du drop ───────────────────────────────────────
+      // Pattern : moitié haute → insérer AVANT, moitié basse → insérer APRÈS
+      item.addEventListener('dragover', e => {
+        if (!dragId || item.dataset.tid === dragId) return;
         e.preventDefault();
-        if (!dragId) return;
-        const domPos = parseInt(zone.dataset.pos);
-        const sid    = zone.dataset.sid;
-        if (!isDropValid(dragId, domPos)) return;
 
-        // Calcule la position d'insertion dans la liste sans la tâche draggée
-        const sorted       = topoSort(state.tasks);
-        const draggedIndex = sorted.findIndex(t => t.id === dragId);
-        const insertPos    = domPos > draggedIndex ? domPos - 1 : domPos;
+        const sortPos  = parseInt(item.dataset.sortpos); // index de cet item dans sorted
+        const sid      = item.dataset.sid;
+        const rect     = item.getBoundingClientRect();
+        const topHalf  = e.clientY < rect.top + rect.height / 2;
 
-        const sortedWithout = sorted.filter(t => t.id !== dragId);
-        const draggedTask   = state.tasks.find(t => t.id === dragId);
-        sortedWithout.splice(insertPos, 0, draggedTask);
-        draggedTask.sectionId = sid === '_' ? null : sid;
-        state.tasks = sortedWithout;
+        // "insérer avant item" = zone domPos=sortPos
+        // "insérer après item" = zone domPos=sortPos+1
+        const domPos = topHalf ? sortPos : sortPos + 1;
+        const valid  = isDropValid(dragId, domPos);
 
-        save();
-        dragId = null;
-        renderAll();
+        e.dataTransfer.dropEffect = valid ? 'move' : 'none';
+        dragTarget = valid ? { pos: domPos, sid } : null;
+
+        clearDropIndicators();
+        if (topHalf) {
+          item.classList.add(valid ? 'drop-before' : 'drop-before-ko');
+        } else {
+          item.classList.add(valid ? 'drop-after' : 'drop-after-ko');
+        }
+      });
+
+      item.addEventListener('dragleave', e => {
+        // Ne pas effacer si on entre dans un élément enfant
+        if (item.contains(e.relatedTarget)) return;
+        clearDropIndicators();
+        dragTarget = null;
+      });
+
+      item.addEventListener('drop', e => {
+        e.preventDefault();
+        applyDrop();
       });
     });
   }
