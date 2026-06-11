@@ -100,6 +100,22 @@
     });
   }
 
+  // ─── Tri topologique (dépendances d'abord) ─────────────────
+
+  function topoSort(tasks) {
+    const map  = Object.fromEntries(tasks.map(t => [t.id, t]));
+    const seen = new Set();
+    const out  = [];
+    function visit(t) {
+      if (seen.has(t.id)) return;
+      seen.add(t.id);
+      if (t.dependsOn && map[t.dependsOn]) visit(map[t.dependsOn]);
+      out.push(t);
+    }
+    tasks.forEach(t => visit(t));
+    return out;
+  }
+
   // ─── Liste des tâches ──────────────────────────────────────
 
   function renderTaskList() {
@@ -109,9 +125,11 @@
       return;
     }
 
-    const sMap  = Object.fromEntries(state.sections.map(s => [s.id, s]));
-    const bySec = {};
-    state.tasks.forEach(t => { const k = t.sectionId || '_'; (bySec[k] = bySec[k] || []).push(t); });
+    const sMap   = Object.fromEntries(state.sections.map(s => [s.id, s]));
+    // Tri topologique global : une tâche dépendante apparaît toujours après sa parente
+    const sorted = topoSort(state.tasks);
+    const bySec  = {};
+    sorted.forEach(t => { const k = t.sectionId || '_'; (bySec[k] = bySec[k] || []).push(t); });
     const secOrder = [
       ...state.sections.map(s => s.id).filter(id => bySec[id]),
       ...(bySec['_'] ? ['_'] : []),
@@ -456,13 +474,21 @@
   }
 
   function newProject() {
-    if (!confirm('Créer un nouveau projet vide ? Le projet actuel sera effacé.')) return;
-    state   = { title: 'Mon Projet', sections: [], tasks: [], customStatuses: [] };
-    nextId  = 1;
+    const input = document.getElementById('new-proj-name');
+    input.value = 'Mon Projet';
+    document.getElementById('modal-new').classList.remove('hidden');
+    setTimeout(() => { input.select(); input.focus(); }, 50);
+  }
+
+  function confirmNewProject() {
+    const name = document.getElementById('new-proj-name').value.trim() || 'Mon Projet';
+    document.getElementById('modal-new').classList.add('hidden');
+    state        = { title: name, sections: [], tasks: [], customStatuses: [] };
+    nextId       = 1;
     filterPerson = null;
     editingId    = null;
     save();
-    document.getElementById('proj-title').textContent = 'Mon Projet';
+    document.getElementById('proj-title').textContent = name;
     endEdit();
     renderAll();
   }
@@ -559,6 +585,12 @@
 
     // Nouveau projet
     document.getElementById('btn-new').addEventListener('click', newProject);
+    document.getElementById('modal-new-ok').addEventListener('click', confirmNewProject);
+    document.getElementById('modal-new-cancel').addEventListener('click', () =>
+      document.getElementById('modal-new').classList.add('hidden'));
+    document.getElementById('new-proj-name').addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); confirmNewProject(); }
+    });
 
     // Import
     document.getElementById('btn-import').addEventListener('click', () =>

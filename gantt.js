@@ -178,10 +178,22 @@ const GanttRenderer = (() => {
     const span  = maxD.getTime() - minD.getTime();
     const xOf   = d => LW + (d.getTime() - minD.getTime()) / span * cW;
 
+    // Tri topologique : une tâche dépendante apparaît toujours après sa parente
+    const tMap   = Object.fromEntries(tasks.map(t => [t.id, t]));
+    const tSeen  = new Set();
+    const sorted = [];
+    function topoVisit(t) {
+      if (tSeen.has(t.id)) return;
+      tSeen.add(t.id);
+      if (t.dependsOn && tMap[t.dependsOn]) topoVisit(tMap[t.dependsOn]);
+      sorted.push(t);
+    }
+    tasks.forEach(t => topoVisit(t));
+
     // Construction des lignes (sections + tâches ordonnées)
     const sMap  = Object.fromEntries(sections.map(s => [s.id, s]));
     const bySec = {};
-    tasks.forEach(t => { const k = t.sectionId || '_'; (bySec[k] = bySec[k] || []).push(t); });
+    sorted.forEach(t => { const k = t.sectionId || '_'; (bySec[k] = bySec[k] || []).push(t); });
     const secOrder = [
       ...sections.map(s => s.id).filter(id => bySec[id]),
       ...(bySec['_'] ? ['_'] : []),
@@ -335,7 +347,7 @@ const GanttRenderer = (() => {
       if (row.type === 's') {
         lblG.appendChild(txt(row.data.name.toUpperCase(), {
           x: 10, y: ly + SEC / 2 + 4,
-          fill: '#94a3b8', 'font-size': 10, 'font-weight': 700, 'letter-spacing': 1,
+          fill: '#e2e8f0', 'font-size': 10, 'font-weight': 700, 'letter-spacing': 1,
         }));
         ly += SEC;
       } else {
@@ -372,7 +384,7 @@ const GanttRenderer = (() => {
     // Titre du projet dans l'angle
     axG.appendChild(txt(title || 'Gantt', {
       x: LW / 2, y: AX / 2 + 5,
-      fill: '#475569', 'font-size': 12, 'font-weight': 800, 'text-anchor': 'middle',
+      fill: '#94a3b8', 'font-size': 12, 'font-weight': 800, 'text-anchor': 'middle',
     }));
 
     // Labels des ticks
@@ -382,13 +394,13 @@ const GanttRenderer = (() => {
       axTickG.appendChild(el('line', { x1: x, y1: AX - 5, x2: x, y2: AX, stroke: '#334155', 'stroke-width': 1 }));
       axTickG.appendChild(txt(tickLabel(d, gran), {
         x: x + 4, y: AX - 18,
-        fill: '#64748b', 'font-size': 10,
+        fill: '#94a3b8', 'font-size': 10,
       }));
       // Mois en sous-label pour les semaines
       if (gran === 'week' && d.getDate() <= 7) {
         axTickG.appendChild(txt(d.toLocaleDateString('fr-FR', { month: 'short' }), {
           x: x + 4, y: AX - 6,
-          fill: '#475569', 'font-size': 9,
+          fill: '#64748b', 'font-size': 9,
         }));
       }
     });
