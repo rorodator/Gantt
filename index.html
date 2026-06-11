@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gantt App</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header id="app-header">
+  <div class="h-left">
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+      <rect x="2" y="3"  width="7"  height="3" rx="1.5" fill="#6366f1"/>
+      <rect x="2" y="8"  width="12" height="3" rx="1.5" fill="#f59e0b"/>
+      <rect x="2" y="13" width="9"  height="3" rx="1.5" fill="#10b981"/>
+      <rect x="2" y="18" width="15" height="3" rx="1.5" fill="#ef4444"/>
+    </svg>
+    <h1 id="proj-title" contenteditable="true" spellcheck="false">Mon Projet</h1>
+  </div>
+  <div class="h-right">
+    <button id="btn-new" class="btn btn-ghost-hdr">✦ Nouveau</button>
+    <button id="btn-import" class="btn btn-ghost-hdr">↑ Importer</button>
+    <input type="file" id="f-import" accept=".json" hidden>
+    <div class="exp-group">
+      <span>Exporter&nbsp;:</span>
+      <button id="btn-png"  class="btn btn-outline-hdr">PNG</button>
+      <button id="btn-svg"  class="btn btn-outline-hdr">SVG</button>
+      <button id="btn-json" class="btn btn-outline-hdr">JSON</button>
+    </div>
+  </div>
+</header>
+
+<div id="app-body">
+  <aside id="sidebar">
+
+    <!-- Formulaire -->
+    <div class="panel" id="panel-form">
+      <button class="panel-hdr open" data-toggle="form-body">
+        <span class="ph-icon">＋</span>
+        <span class="ph-title">Nouvelle tâche</span>
+        <span class="ph-arrow">›</span>
+      </button>
+      <div id="form-body" class="panel-body">
+        <form id="task-form" autocomplete="off" novalidate>
+
+          <div class="field">
+            <label for="f-name">Nom</label>
+            <input id="f-name" type="text" placeholder="ex : Rédiger les specs" required>
+          </div>
+
+          <div class="field">
+            <label for="f-section">Section</label>
+            <div class="frow">
+              <select id="f-section"><option value="">— Aucune —</option></select>
+              <button type="button" id="btn-add-sec" class="btn-icon" title="Créer une section">＋</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="f-person">Assignée à</label>
+            <input id="f-person" type="text" list="persons-list" placeholder="ex : Alice">
+            <datalist id="persons-list"></datalist>
+          </div>
+
+          <div class="field">
+            <label for="f-status">Statut</label>
+            <div class="frow">
+              <select id="f-status">
+                <option value="active">Active</option>
+                <option value="done">Terminée</option>
+                <option value="crit">Critique</option>
+              </select>
+              <button type="button" id="btn-manage-status" class="btn-icon" title="Gérer les statuts">⚙</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="f-depends">Dépend de</label>
+            <select id="f-depends"><option value="">— Aucune dépendance —</option></select>
+          </div>
+
+          <div class="field" id="field-start">
+            <label for="f-start">Date de début</label>
+            <input id="f-start" type="date">
+          </div>
+
+          <div class="field">
+            <label>Durée</label>
+            <div class="frow">
+              <input id="f-duration" type="number" min="1" value="5" required>
+              <select id="f-unit">
+                <option value="d">Jours</option>
+                <option value="w">Semaines</option>
+                <option value="m">Mois</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-btns">
+            <button type="submit" id="btn-submit" class="btn btn-primary">Ajouter</button>
+            <button type="button" id="btn-cancel" class="btn btn-ghost" style="display:none">Annuler</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Liste des tâches -->
+    <div class="panel">
+      <button class="panel-hdr open" data-toggle="tasks-body">
+        <span class="ph-icon">☰</span>
+        <span class="ph-title">Tâches</span>
+        <span class="ph-arrow">›</span>
+      </button>
+      <div id="tasks-body" class="panel-body"></div>
+    </div>
+
+  </aside>
+
+  <main id="gantt-main">
+    <div id="legend"></div>
+    <div id="gantt-container"></div>
+  </main>
+</div>
+
+<!-- Modal : nouvelle section -->
+<div id="modal-sec" class="modal hidden">
+  <div class="mbox">
+    <h3>Nouvelle section</h3>
+    <input id="sec-name" type="text" class="minput" placeholder="Nom de la section">
+    <div class="mbtn">
+      <button id="modal-sec-cancel" class="btn btn-ghost">Annuler</button>
+      <button id="modal-sec-ok" class="btn btn-primary">Créer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal : statuts personnalisés -->
+<div id="modal-status" class="modal hidden">
+  <div class="mbox">
+    <h3>Statuts personnalisés</h3>
+    <div id="cs-list"></div>
+    <div class="cs-add">
+      <input id="cs-name" type="text" class="minput" placeholder="Nom du statut" style="flex:1;margin-bottom:0">
+      <input id="cs-color" type="color" value="#8b5cf6" title="Couleur de bordure">
+      <button id="btn-add-cs" class="btn btn-primary">Ajouter</button>
+    </div>
+    <div class="mbtn">
+      <button id="modal-status-close" class="btn btn-ghost">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<script src="gantt.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
