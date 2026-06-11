@@ -46,12 +46,15 @@ const GanttRenderer = (() => {
         d: durToDays(t.duration, t.unit),
       };
     });
-    // Passes itératives pour résoudre les chaînes de dépendances
+    // Passes itératives pour résoudre les chaînes de dépendances (y compris multiples)
     for (let pass = 0; pass <= tasks.length; pass++) {
       tasks.forEach(t => {
-        const r = map[t.id];
-        if (t.dependsOn && map[t.dependsOn]?.e) {
-          r.s = new Date(map[t.dependsOn].e);
+        const r    = map[t.id];
+        const deps = Array.isArray(t.dependsOn) ? t.dependsOn : (t.dependsOn ? [t.dependsOn] : []);
+        const ends = deps.map(d => map[d]?.e).filter(Boolean);
+        if (ends.length) {
+          // Début = max de toutes les fins de dépendances
+          r.s = new Date(Math.max(...ends.map(e => e.getTime())));
         }
         if (r.s && r.d > 0) {
           r.e = addDays(r.s, r.d);
@@ -172,20 +175,27 @@ const GanttRenderer = (() => {
     const ticks = generateTicks(minD, maxD, gran);
     const minPx = { day: 32, week: 64, month: 84 }[gran];
 
-    // Dimensions SVG
-    const cW = Math.max((container.clientWidth || 900) - LW - 32, ticks.length * minPx);
+    // Dimensions SVG — seuil : 10 px par jour minimum pour rester lisible
+    const MIN_PX_PER_DAY = 10;
+    const totalSpanDays  = (maxD.getTime() - minD.getTime()) / 86400000;
+    const cW = Math.max(
+      (container.clientWidth || 900) - LW - 32,
+      Math.ceil(totalSpanDays * MIN_PX_PER_DAY),
+      ticks.length * minPx,
+    );
     const totalW = LW + cW;
     const span  = maxD.getTime() - minD.getTime();
     const xOf   = d => LW + (d.getTime() - minD.getTime()) / span * cW;
 
-    // Tri topologique : une tâche dépendante apparaît toujours après sa parente
+    // Tri topologique : une tâche dépendante apparaît toujours après ses parents
     const tMap   = Object.fromEntries(tasks.map(t => [t.id, t]));
     const tSeen  = new Set();
     const sorted = [];
     function topoVisit(t) {
       if (tSeen.has(t.id)) return;
       tSeen.add(t.id);
-      if (t.dependsOn && tMap[t.dependsOn]) topoVisit(tMap[t.dependsOn]);
+      const deps = Array.isArray(t.dependsOn) ? t.dependsOn : (t.dependsOn ? [t.dependsOn] : []);
+      deps.forEach(dep => { if (tMap[dep]) topoVisit(tMap[dep]); });
       sorted.push(t);
     }
     tasks.forEach(t => topoVisit(t));
@@ -227,6 +237,11 @@ const GanttRenderer = (() => {
     const hp = el('pattern', { id: 'gh', x: 0, y: 0, width: 8, height: 8, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' });
     hp.appendChild(el('line', { x1: 0, y1: 0, x2: 0, y2: 8, stroke: 'rgba(255,255,255,0.52)', 'stroke-width': 4 }));
     defs.appendChild(hp);
+
+    // Flèche de dépendance
+    const mkArr = el('marker', { id: 'arr', viewBox: '0 0 8 8', refX: 7, refY: 4, markerWidth: 6, markerHeight: 6, orient: 'auto' });
+    mkArr.appendChild(el('path', { d: 'M0,0 L8,4 L0,8 Z', fill: '#94a3b8' }));
+    defs.appendChild(mkArr);
 
     // ClipPath zone graphique
     const cc = el('clipPath', { id: 'gc' });
@@ -273,6 +288,40 @@ const GanttRenderer = (() => {
     });
     svg.appendChild(rowBgG);
 
+    // ── Carte Y par tâche (pour les flèches) ─────────────────
+    const rowYMap = {};
+    { let ry = AX;
+      rows.forEach(row => {
+        if (row.type === 's') { ry += SEC; }
+        else { rowYMap[row.data.id] = ry + ROW / 2; ry += ROW; }
+      });
+    }
+
+    // ── Flèches de dépendances ───────────────────────────────
+    const arrowsG = el('g', { 'clip-path': 'url(#gc)', opacity: 0.55 });
+    tasks.forEach(task => {
+      const deps = Array.isArray(task.dependsOn) ? task.dependsOn : (task.dependsOn ? [task.dependsOn] : []);
+      const r  = resolved[task.id];
+      if (!r?.s) return;
+      const taskX = xOf(r.s);
+      const taskY = rowYMap[task.id];
+      if (taskY === undefined) return;
+      deps.forEach(depId => {
+        const dr = resolved[depId];
+        if (!dr?.e) return;
+        const depY = rowYMap[depId];
+        if (depY === undefined) return;
+        const depX = xOf(dr.e);
+        const mx   = (depX + taskX) / 2;
+        arrowsG.appendChild(el('path', {
+          d: `M${depX},${depY} C${mx},${depY} ${mx},${taskY} ${taskX},${taskY}`,
+          fill: 'none', stroke: '#94a3b8', 'stroke-width': 1.5,
+          'marker-end': 'url(#arr)',
+        }));
+      });
+    });
+    svg.appendChild(arrowsG);
+
     // ── Barres ───────────────────────────────────────────────
     const barsG = el('g', { 'clip-path': 'url(#gc)' });
     let by = AX;
@@ -289,7 +338,16 @@ const GanttRenderer = (() => {
       const bw        = Math.max(5, xOf(r.e) - bx);
       const bTop      = by + BPD;
       const pColor    = personColor(task.person, persons);
-      const barG      = el('g', { opacity: filtered ? 0.12 : 1 });
+      const barG      = el('g', {
+        class: 'g-bar',
+        'data-tid':    task.id,
+        'data-name':   task.name,
+        'data-start':  r.s.toLocaleDateString('fr-FR'),
+        'data-end':    r.e.toLocaleDateString('fr-FR'),
+        'data-person': task.person || '',
+        'data-desc':   task.description || '',
+        opacity: filtered ? 0.12 : 1,
+      });
 
       // Barre de base
       barG.appendChild(el('rect', { x: bx, y: bTop, width: bw, height: BH, rx: 4, fill: pColor }));
@@ -332,6 +390,9 @@ const GanttRenderer = (() => {
           fill: pColor, 'font-size': 13, 'font-weight': 700,
         }));
       }
+
+      // Rect transparent en overlay pour capturer les events sur toute la barre
+      barG.appendChild(el('rect', { x: bx, y: bTop, width: bw, height: BH, rx: 4, fill: 'transparent', style: 'pointer-events:all' }));
 
       barsG.appendChild(barG);
       by += ROW;

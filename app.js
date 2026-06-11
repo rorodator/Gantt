@@ -31,6 +31,14 @@
         if (p.nextId)  nextId = p.nextId;
       }
     } catch (_) {}
+    // Migration : dependsOn string → array
+    state.tasks.forEach(t => {
+      if (typeof t.dependsOn === 'string') {
+        t.dependsOn = t.dependsOn ? [t.dependsOn] : [];
+      } else if (!Array.isArray(t.dependsOn) || t.dependsOn == null) {
+        t.dependsOn = [];
+      }
+    });
   }
 
   function uid(prefix) {
@@ -111,7 +119,7 @@
     function visit(t) {
       if (seen.has(t.id)) return;
       seen.add(t.id);
-      if (t.dependsOn && map[t.dependsOn]) visit(map[t.dependsOn]);
+      (t.dependsOn || []).forEach(dep => { if (map[dep]) visit(map[dep]); });
       out.push(t);
     }
     tasks.forEach(t => visit(t));
@@ -125,9 +133,10 @@
     const map = Object.fromEntries(state.tasks.map(t => [t.id, t]));
     function walk(id) {
       const t = map[id];
-      if (!t || !t.dependsOn || set.has(t.dependsOn)) return;
-      set.add(t.dependsOn);
-      walk(t.dependsOn);
+      if (!t) return;
+      (t.dependsOn || []).forEach(dep => {
+        if (!set.has(dep)) { set.add(dep); walk(dep); }
+      });
     }
     walk(taskId);
     return set;
@@ -136,7 +145,7 @@
   function getDescendants(taskId) {
     const set = new Set();
     function walk(id) {
-      state.tasks.filter(t => t.dependsOn === id).forEach(t => {
+      state.tasks.filter(t => (t.dependsOn || []).includes(id)).forEach(t => {
         if (!set.has(t.id)) { set.add(t.id); walk(t.id); }
       });
     }
@@ -366,15 +375,21 @@
         `<option value="${cs.id}">${escH(cs.name)}</option>`).join('');
     if (stv) fst.value = stv;
 
-    // Dépend de (exclure la tâche en cours d'édition)
-    const fd = document.getElementById('f-depends');
-    const dv = fd.value;
-    fd.innerHTML = '<option value="">— Aucune dépendance —</option>' +
-      state.tasks
-        .filter(t => t.id !== editingId)
-        .map(t => `<option value="${t.id}">${escH(t.name)}</option>`)
-        .join('');
-    if (dv) fd.value = dv;
+    // Dépendances multi-sélection (checkboxes)
+    // Quand on édite : la sélection vient de startEdit ; sinon on préserve ce qui est coché
+    const wrap = document.getElementById('f-depends-wrap');
+    const prevSelected = editingId
+      ? new Set(Array.from(wrap.querySelectorAll('input:checked')).map(cb => cb.value))
+      : new Set(); // en mode "ajout", on repart toujours de zéro après syncFormSelects
+    const available = state.tasks.filter(t => t.id !== editingId);
+    wrap.innerHTML = available.length
+      ? available.map(t => `<label class="dep-opt">
+          <input type="checkbox" value="${t.id}" ${prevSelected.has(t.id) ? 'checked' : ''}>
+          <span class="dep-name">${escH(t.name)}</span>
+        </label>`).join('')
+      : '<span class="dep-none">Aucune tâche disponible.</span>';
+    wrap.querySelectorAll('input[type=checkbox]').forEach(cb =>
+      cb.addEventListener('change', updateStartField));
 
     // Datalist personnes
     const dl = document.getElementById('persons-list');
@@ -384,7 +399,7 @@
   }
 
   function updateStartField() {
-    const hasDep = !!document.getElementById('f-depends').value;
+    const hasDep = !!document.querySelector('#f-depends-wrap input:checked');
     const wrap   = document.getElementById('field-start');
     wrap.style.opacity = hasDep ? '0.4' : '1';
     const inp = document.getElementById('f-start');
@@ -397,32 +412,34 @@
   function onSubmit(e) {
     e.preventDefault();
 
-    const name      = document.getElementById('f-name').value.trim();
-    const sectionId = document.getElementById('f-section').value || null;
-    const person    = document.getElementById('f-person').value.trim() || null;
-    const status    = document.getElementById('f-status').value;
-    const dependsOn = document.getElementById('f-depends').value || null;
-    const startDate = document.getElementById('f-start').value || null;
-    const duration  = parseFloat(document.getElementById('f-duration').value) || 1;
-    const unit      = document.getElementById('f-unit').value;
+    const name        = document.getElementById('f-name').value.trim();
+    const description = document.getElementById('f-desc').value.trim() || null;
+    const sectionId   = document.getElementById('f-section').value || null;
+    const person      = document.getElementById('f-person').value.trim() || null;
+    const status      = document.getElementById('f-status').value;
+    const dependsOn   = Array.from(document.querySelectorAll('#f-depends-wrap input:checked')).map(cb => cb.value);
+    const startDate   = document.getElementById('f-start').value || null;
+    const duration    = parseFloat(document.getElementById('f-duration').value) || 1;
+    const unit        = document.getElementById('f-unit').value;
 
     if (!name) {
       document.getElementById('f-name').focus();
       return;
     }
-    if (!dependsOn && !startDate) {
+    if (!dependsOn.length && !startDate) {
       alert('Veuillez indiquer une date de début ou sélectionner une dépendance.');
       return;
     }
 
     const task = {
-      id:        editingId || uid('t'),
+      id:          editingId || uid('t'),
       name,
+      description,
       sectionId,
       person,
       status,
       dependsOn,
-      startDate: dependsOn ? null : startDate,
+      startDate:   dependsOn.length ? null : startDate,
       duration,
       unit,
     };
@@ -434,7 +451,10 @@
     } else {
       state.tasks.push(task);
       e.target.reset();
+      document.getElementById('f-desc').value     = '';
       document.getElementById('f-duration').value = 5;
+      // Reset explicite des checkboxes dynamiques
+      document.querySelectorAll('#f-depends-wrap input[type=checkbox]').forEach(cb => { cb.checked = false; });
     }
 
     save();
@@ -445,7 +465,7 @@
     if (!confirm('Supprimer cette tâche ?')) return;
     state.tasks = state.tasks.filter(t => t.id !== id);
     // Libérer les dépendances orphelines
-    state.tasks.forEach(t => { if (t.dependsOn === id) t.dependsOn = null; });
+    state.tasks.forEach(t => { t.dependsOn = (t.dependsOn || []).filter(d => d !== id); });
     save();
     renderAll();
   }
@@ -456,10 +476,10 @@
     editingId = id;
 
     document.getElementById('f-name').value     = t.name;
+    document.getElementById('f-desc').value     = t.description || '';
     document.getElementById('f-section').value  = t.sectionId || '';
     document.getElementById('f-person').value   = t.person || '';
     document.getElementById('f-status').value   = t.status;
-    document.getElementById('f-depends').value  = t.dependsOn || '';
     document.getElementById('f-start').value    = t.startDate || '';
     document.getElementById('f-duration').value = t.duration;
     document.getElementById('f-unit').value     = t.unit;
@@ -467,6 +487,11 @@
     document.getElementById('btn-submit').textContent = 'Enregistrer';
     document.getElementById('btn-cancel').style.display = '';
     syncFormSelects();
+    // Cocher les dépendances de la tâche (après syncFormSelects qui recrée les checkboxes)
+    const deps = Array.isArray(t.dependsOn) ? t.dependsOn : [];
+    document.querySelectorAll('#f-depends-wrap input[type=checkbox]').forEach(cb => {
+      cb.checked = deps.includes(cb.value);
+    });
 
     // Ouvrir le panneau formulaire si replié
     const formBody = document.getElementById('form-body');
@@ -481,9 +506,11 @@
   function endEdit() {
     editingId = null;
     document.getElementById('task-form').reset();
+    document.getElementById('f-desc').value     = '';
     document.getElementById('f-duration').value = 5;
     document.getElementById('btn-submit').textContent = 'Ajouter';
     document.getElementById('btn-cancel').style.display = 'none';
+    document.querySelectorAll('#f-depends-wrap input[type=checkbox]').forEach(cb => { cb.checked = false; });
     syncFormSelects();
   }
 
@@ -676,15 +703,65 @@
       { id: 'sd_c', name: 'Livraison' },
     ];
     state.tasks = [
-      { id: 'td1', name: 'Specs fonctionnelles',    sectionId: 'sd_a', person: 'Alice', status: 'done',   dependsOn: null,  startDate: td(-14), duration: 5, unit: 'd' },
-      { id: 'td2', name: 'Maquettes UI',             sectionId: 'sd_a', person: 'Bob',   status: 'done',   dependsOn: 'td1', startDate: null,    duration: 7, unit: 'd' },
-      { id: 'td3', name: 'Setup infrastructure',     sectionId: 'sd_b', person: 'Alice', status: 'active', dependsOn: 'td1', startDate: null,    duration: 5, unit: 'd' },
-      { id: 'td4', name: 'Développement frontend',   sectionId: 'sd_b', person: 'Bob',   status: 'active', dependsOn: 'td2', startDate: null,    duration: 14, unit: 'd' },
-      { id: 'td5', name: 'API & base de données',    sectionId: 'sd_b', person: 'Alice', status: 'crit',   dependsOn: 'td3', startDate: null,    duration: 10, unit: 'd' },
-      { id: 'td6', name: 'Tests & intégration',      sectionId: 'sd_c', person: 'Bob',   status: 'active', dependsOn: 'td4', startDate: null,    duration: 5,  unit: 'd' },
-      { id: 'td7', name: 'Déploiement',              sectionId: 'sd_c', person: 'Alice', status: 'active', dependsOn: 'td6', startDate: null,    duration: 2,  unit: 'd' },
+      { id: 'td1', name: 'Specs fonctionnelles',    sectionId: 'sd_a', person: 'Alice', status: 'done',   dependsOn: [],           startDate: td(-14), duration: 5,  unit: 'd', description: 'Rédaction du cahier des charges fonctionnel.' },
+      { id: 'td2', name: 'Maquettes UI',             sectionId: 'sd_a', person: 'Bob',   status: 'done',   dependsOn: ['td1'],      startDate: null,    duration: 7,  unit: 'd', description: null },
+      { id: 'td3', name: 'Setup infrastructure',     sectionId: 'sd_b', person: 'Alice', status: 'active', dependsOn: ['td1'],      startDate: null,    duration: 5,  unit: 'd', description: null },
+      { id: 'td4', name: 'Développement frontend',   sectionId: 'sd_b', person: 'Bob',   status: 'active', dependsOn: ['td2'],      startDate: null,    duration: 14, unit: 'd', description: null },
+      { id: 'td5', name: 'API & base de données',    sectionId: 'sd_b', person: 'Alice', status: 'crit',   dependsOn: ['td3'],      startDate: null,    duration: 10, unit: 'd', description: 'Développement des endpoints REST et schéma BDD.' },
+      { id: 'td6', name: 'Tests & intégration',      sectionId: 'sd_c', person: 'Bob',   status: 'active', dependsOn: ['td4','td5'],startDate: null,    duration: 5,  unit: 'd', description: 'td6 dépend à la fois de frontend et de l\'API.' },
+      { id: 'td7', name: 'Déploiement',              sectionId: 'sd_c', person: 'Alice', status: 'active', dependsOn: ['td6'],      startDate: null,    duration: 2,  unit: 'd', description: null },
     ];
     nextId = 20;
+  }
+
+  // ─── Tooltip Gantt ─────────────────────────────────────────
+
+  function setupTooltip() {
+    const tip  = document.getElementById('gantt-tooltip');
+    const cont = document.getElementById('gantt-container');
+    let current = null;
+
+    cont.addEventListener('mouseover', e => {
+      const bar = e.target.closest('.g-bar');
+      if (!bar) {
+        if (current) { tip.classList.add('hidden'); current = null; }
+        return;
+      }
+      if (bar === current) return;
+      current = bar;
+
+      const name   = bar.dataset.name   || '';
+      const start  = bar.dataset.start  || '';
+      const end    = bar.dataset.end    || '';
+      const person = bar.dataset.person || '';
+      const desc   = bar.dataset.desc   || '';
+
+      let html = `<div class="g-tip-name">${escH(name)}</div>`;
+      html    += `<div class="g-tip-dates">📅 ${escH(start)} → ${escH(end)}</div>`;
+      if (person) html += `<div class="g-tip-person">👤 ${escH(person)}</div>`;
+      if (desc)   html += `<div class="g-tip-desc">${escH(desc)}</div>`;
+
+      tip.innerHTML = html;
+      tip.classList.remove('hidden');
+    });
+
+    cont.addEventListener('mousemove', e => {
+      if (tip.classList.contains('hidden')) return;
+      const margin = 14;
+      let x = e.clientX + margin;
+      let y = e.clientY + margin;
+      const tw = tip.offsetWidth;
+      const th = tip.offsetHeight;
+      if (x + tw > window.innerWidth  - 4) x = e.clientX - tw - margin;
+      if (y + th > window.innerHeight - 4) y = e.clientY - th - margin;
+      tip.style.left = x + 'px';
+      tip.style.top  = y + 'px';
+    });
+
+    cont.addEventListener('mouseleave', () => {
+      tip.classList.add('hidden');
+      current = null;
+    });
   }
 
   // ─── Init ──────────────────────────────────────────────────
@@ -711,7 +788,6 @@
     // Formulaire
     document.getElementById('task-form').addEventListener('submit', onSubmit);
     document.getElementById('btn-cancel').addEventListener('click', endEdit);
-    document.getElementById('f-depends').addEventListener('change', updateStartField);
 
     // Section
     document.getElementById('btn-add-sec').addEventListener('click', openSecModal);
@@ -771,6 +847,9 @@
         }
       });
     });
+
+    // Tooltip
+    setupTooltip();
 
     // Re-rendu au redimensionnement
     let resizeTimer;

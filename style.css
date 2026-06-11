@@ -164,7 +164,8 @@ body {
 .field input[type="text"],
 .field input[type="date"],
 .field input[type="number"],
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   padding: 7px 9px;
   border: 1.5px solid var(--border);
@@ -174,13 +175,30 @@ body {
   background: var(--surface);
   transition: border-color 0.15s, box-shadow 0.15s;
   appearance: auto;
+  font-family: inherit;
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 52px;
+  max-height: 110px;
+  line-height: 1.45;
 }
 
 .field input:focus,
-.field select:focus {
+.field select:focus,
+.field textarea:focus {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(99,102,241,0.14);
+}
+
+.f-deps-hint {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-light);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .field input:disabled {
@@ -348,6 +366,61 @@ body {
   transition: opacity 0.12s;
 }
 .task-item:hover .ti-actions { opacity: 1; }
+
+/* ─── Widget multi-dépendances ────────────────────────────── */
+.deps-wrap {
+  max-height: 110px;
+  overflow-y: auto;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 3px 2px;
+}
+.deps-wrap::-webkit-scrollbar { width: 4px; }
+.deps-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.dep-opt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s;
+}
+.dep-opt:hover { background: var(--bg); }
+.dep-opt input[type=checkbox] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.dep-name { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dep-none { display: block; padding: 6px 8px; font-size: 12px; color: var(--text-light); }
+
+/* ─── Tooltip Gantt ───────────────────────────────────────── */
+.g-tip {
+  position: fixed;
+  background: #1e293b;
+  color: #f1f5f9;
+  border-radius: 9px;
+  padding: 10px 13px;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+  pointer-events: none;
+  z-index: 1000;
+  max-width: 280px;
+  word-break: break-word;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.g-tip.hidden { display: none; }
+.g-tip-name  { font-weight: 700; font-size: 13px; margin-bottom: 5px; color: #fff; }
+.g-tip-dates { font-size: 11px; color: #94a3b8; }
+.g-tip-person{ font-size: 11px; margin-top: 2px; color: #94a3b8; }
+.g-tip-desc  { margin-top: 7px; padding-top: 7px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 11px; color: #cbd5e1; font-style: italic; line-height: 1.6; }
 
 /* ─── Zone Gantt principale ───────────────────────────────── */
 #gantt-main {

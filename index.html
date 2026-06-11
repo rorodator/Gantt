@@ -50,6 +50,11 @@
           </div>
 
           <div class="field">
+            <label for="f-desc">Description</label>
+            <textarea id="f-desc" placeholder="Description optionnelle…" rows="2"></textarea>
+          </div>
+
+          <div class="field">
             <label for="f-section">Section</label>
             <div class="frow">
               <select id="f-section"><option value="">— Aucune —</option></select>
@@ -76,8 +81,10 @@
           </div>
 
           <div class="field">
-            <label for="f-depends">Dépend de</label>
-            <select id="f-depends"><option value="">— Aucune dépendance —</option></select>
+            <label>Dépend de <span class="f-deps-hint">(plusieurs possibles)</span></label>
+            <div id="f-depends-wrap" class="deps-wrap">
+              <span class="dep-none">Aucune tâche disponible.</span>
+            </div>
           </div>
 
           <div class="field" id="field-start">
@@ -162,6 +169,8 @@
     </div>
   </div>
 </div>
+
+<div id="gantt-tooltip" class="g-tip hidden" aria-hidden="true"></div>
 
 <script src="gantt.js"></script>
 <script src="app.js"></script>
