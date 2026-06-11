@@ -10,9 +10,10 @@
     tasks:         [],
     customStatuses: [],
   };
-  let nextId      = 1;
+  let nextId       = 1;
   let filterPerson = null;
   let editingId    = null;
+  let dragId       = null;  // id de la tâche en cours de drag
 
   // ─── Persistance localStorage ──────────────────────────────
 
@@ -116,17 +117,67 @@
     return out;
   }
 
+  // ─── Helpers drag & drop ───────────────────────────────────
+
+  function getAncestors(taskId) {
+    const set = new Set();
+    const map = Object.fromEntries(state.tasks.map(t => [t.id, t]));
+    function walk(id) {
+      const t = map[id];
+      if (!t || !t.dependsOn || set.has(t.dependsOn)) return;
+      set.add(t.dependsOn);
+      walk(t.dependsOn);
+    }
+    walk(taskId);
+    return set;
+  }
+
+  function getDescendants(taskId) {
+    const set = new Set();
+    function walk(id) {
+      state.tasks.filter(t => t.dependsOn === id).forEach(t => {
+        if (!set.has(t.id)) { set.add(t.id); walk(t.id); }
+      });
+    }
+    walk(taskId);
+    return set;
+  }
+
+  // domPos = index dans la liste complète triée (avec la tâche draggée)
+  function isDropValid(draggedId, domPos) {
+    const sorted       = topoSort(state.tasks);
+    const draggedIndex = sorted.findIndex(t => t.id === draggedId);
+
+    // Déposer à la position actuelle = toujours valide (pas de mouvement)
+    if (domPos === draggedIndex || domPos === draggedIndex + 1) return true;
+
+    // Calcule la position cible dans la liste sans la tâche draggée
+    const insertPos     = domPos > draggedIndex ? domPos - 1 : domPos;
+    const sortedWithout = sorted.filter(t => t.id !== draggedId);
+    const ancestors     = getAncestors(draggedId);
+    const descendants   = getDescendants(draggedId);
+
+    // Aucun ancêtre ne doit être après la position cible
+    for (let i = insertPos; i < sortedWithout.length; i++) {
+      if (ancestors.has(sortedWithout[i].id)) return false;
+    }
+    // Aucun descendant ne doit être avant la position cible
+    for (let i = 0; i < insertPos; i++) {
+      if (descendants.has(sortedWithout[i].id)) return false;
+    }
+    return true;
+  }
+
   // ─── Liste des tâches ──────────────────────────────────────
 
   function renderTaskList() {
-    const el = document.getElementById('tasks-body');
+    const container = document.getElementById('tasks-body');
     if (!state.tasks.length) {
-      el.innerHTML = '<p class="empty-msg">Aucune tâche.</p>';
+      container.innerHTML = '<p class="empty-msg">Aucune tâche.</p>';
       return;
     }
 
     const sMap   = Object.fromEntries(state.sections.map(s => [s.id, s]));
-    // Tri topologique global : une tâche dépendante apparaît toujours après sa parente
     const sorted = topoSort(state.tasks);
     const bySec  = {};
     sorted.forEach(t => { const k = t.sectionId || '_'; (bySec[k] = bySec[k] || []).push(t); });
@@ -136,7 +187,8 @@
     ];
 
     const persons = getPersons();
-    let html = '';
+    let html     = '';
+    let flatIdx  = 0;  // position dans sorted (pour data-pos des zones de dépôt)
 
     secOrder.forEach(sid => {
       if (sid !== '_') {
@@ -145,10 +197,17 @@
           <button class="bism danger" data-del-sec="${sid}" title="Supprimer la section">×</button>
         </div>`;
       }
-      (bySec[sid] || []).forEach(t => {
+
+      const tasksInSec = bySec[sid] || [];
+
+      // Zone de dépôt en tête de section
+      html += `<div class="dz" data-pos="${flatIdx}" data-sid="${sid}"></div>`;
+
+      tasksInSec.forEach((t, i) => {
         const c  = GanttRenderer.personColor(t.person, persons);
         const sl = statusLabel(t.status);
-        html += `<div class="task-item">
+        html += `<div class="task-item" draggable="true" data-tid="${t.id}">
+          <span class="drag-handle" title="Déplacer">⠿</span>
           <div class="ti-bar" style="background:${c}"></div>
           <div class="ti-body">
             <span class="ti-name">${escH(t.name)}</span>
@@ -161,17 +220,86 @@
             <button class="bism danger" data-del="${t.id}" title="Supprimer">×</button>
           </div>
         </div>`;
+
+        flatIdx++;
+
+        // Zone de dépôt après chaque tâche (dans sa section)
+        html += `<div class="dz" data-pos="${flatIdx}" data-sid="${sid}"></div>`;
       });
     });
 
-    el.innerHTML = html;
+    container.innerHTML = html;
 
-    el.querySelectorAll('[data-del]').forEach(b =>
+    // Clics (inchangés)
+    container.querySelectorAll('[data-del]').forEach(b =>
       b.addEventListener('click', e => { e.stopPropagation(); deleteTask(b.dataset.del); }));
-    el.querySelectorAll('[data-edit]').forEach(b =>
+    container.querySelectorAll('[data-edit]').forEach(b =>
       b.addEventListener('click', e => { e.stopPropagation(); startEdit(b.dataset.edit); }));
-    el.querySelectorAll('[data-del-sec]').forEach(b =>
+    container.querySelectorAll('[data-del-sec]').forEach(b =>
       b.addEventListener('click', e => { e.stopPropagation(); deleteSection(b.dataset.delSec); }));
+
+    // Drag & Drop
+    setupDragDrop(container);
+  }
+
+  function setupDragDrop(container) {
+    // ── Drag source : les task-items ──────────────────────────
+    container.querySelectorAll('.task-item[data-tid]').forEach(item => {
+      item.addEventListener('dragstart', e => {
+        dragId = item.dataset.tid;
+        // Léger délai pour que le navigateur capture le ghost avant d'appliquer l'opacité
+        requestAnimationFrame(() => item.classList.add('dragging'));
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', dragId);
+      });
+
+      item.addEventListener('dragend', () => {
+        dragId = null;
+        item.classList.remove('dragging');
+        container.querySelectorAll('.dz').forEach(z => z.className = 'dz');
+      });
+    });
+
+    // ── Zones de dépôt ────────────────────────────────────────
+    container.querySelectorAll('.dz').forEach(zone => {
+      zone.addEventListener('dragover', e => {
+        if (!dragId) return;
+        const pos   = parseInt(zone.dataset.pos);
+        const valid = isDropValid(dragId, pos);
+        zone.className = 'dz ' + (valid ? 'dz-ok' : 'dz-ko');
+        if (valid) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+        }
+      });
+
+      zone.addEventListener('dragleave', () => {
+        zone.className = 'dz';
+      });
+
+      zone.addEventListener('drop', e => {
+        e.preventDefault();
+        if (!dragId) return;
+        const domPos = parseInt(zone.dataset.pos);
+        const sid    = zone.dataset.sid;
+        if (!isDropValid(dragId, domPos)) return;
+
+        // Calcule la position d'insertion dans la liste sans la tâche draggée
+        const sorted       = topoSort(state.tasks);
+        const draggedIndex = sorted.findIndex(t => t.id === dragId);
+        const insertPos    = domPos > draggedIndex ? domPos - 1 : domPos;
+
+        const sortedWithout = sorted.filter(t => t.id !== dragId);
+        const draggedTask   = state.tasks.find(t => t.id === dragId);
+        sortedWithout.splice(insertPos, 0, draggedTask);
+        draggedTask.sectionId = sid === '_' ? null : sid;
+        state.tasks = sortedWithout;
+
+        save();
+        dragId = null;
+        renderAll();
+      });
+    });
   }
 
   function getPersons() {
